@@ -1,4 +1,6 @@
-# Retail Store Sample App - Kind  Deployment
+# Retail Store Sample App - Kind Frugal Deployment
+
+This directory contains a **frugal** Kubernetes deployment optimized for single-node Kind clusters with limited resources.
 
 ## 🎯 **Optimizations for Kind**
 
@@ -146,31 +148,21 @@ kubectl scale deployment catalog --replicas=2 -n retail-store
 
 ## 📁 **Files**
 
-### **k8s/ Directory Structure:**
-```
-k8s/
-├── 01-namespace.yaml          ✅ Namespace definition
-├── 02-secrets.yaml            ✅ Database credentials
-├── 03-configmaps.yaml         ✅ Application configuration
-├── 04-databases.yaml          ✅ All database services
-├── 05-catalog.yaml            ✅ Catalog service
-├── 06-cart.yaml              ✅ Cart service
-├── 07-checkout.yaml          ✅ Checkout service
-├── 08-orders.yaml            ✅ Orders service
-├── 09-ui.yaml                ✅ UI service
-├── 10-ingress.yaml           ✅ Ingress and LoadBalancer
-├── deploy.sh                 ✅ Full deployment script (executable)
-├── deploy-kind.sh            ✅ Kind-optimized script (executable)
-├── kind-frugal.yaml          ✅ Frugal manifest (777 lines)
-├── KIND-README.md            ✅ Kind documentation
-├── kubernetes.yaml           ✅ Combined full manifest
-├── README.md                 ✅ Full deployment guide
-├── undeploy.sh               ✅ Full cleanup script (executable)
-└── undeploy-kind.sh          ✅ Kind cleanup script (executable)
-```
-
-### **Key Files for Kind Deployment:**
 - `kind-frugal.yaml` - Frugal deployment manifest
 - `deploy-kind.sh` - Automated deployment script
 - `undeploy-kind.sh` - Cleanup script
-- `KIND-README.md` - Detailed Kind documentation
+- `KIND-README.md` - This documentation
+
+## 🆚 **Comparison with Full Deployment**
+
+| Feature | Full Deployment | Frugal Deployment |
+|---------|----------------|-------------------|
+| Replicas | 2 per service | 1 per service |
+| Memory | ~3GB total | ~1.5GB total |
+| CPU | ~3 cores total | ~1.5 cores total |
+| Health Checks | ✅ Full probes | ❌ None |
+| Security | ✅ Full context | ⚠️ Simplified |
+| High Availability | ✅ Yes | ❌ No |
+| Load Balancing | ✅ Yes | ❌ No |
+
+This frugal deployment is perfect for development, testing, and learning on resource-constrained Kind clusters!

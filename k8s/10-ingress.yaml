@@ -1,0 +1,63 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retail-store-ingress
+  namespace: retail-store
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: retail-store.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ui
+            port:
+              number: 8080
+      - path: /catalog
+        pathType: Prefix
+        backend:
+          service:
+            name: catalog
+            port:
+              number: 8080
+      - path: /carts
+        pathType: Prefix
+        backend:
+          service:
+            name: carts
+            port:
+              number: 8080
+      - path: /orders
+        pathType: Prefix
+        backend:
+          service:
+            name: orders
+            port:
+              number: 8080
+      - path: /checkout
+        pathType: Prefix
+        backend:
+          service:
+            name: checkout
+            port:
+              number: 8080
+---
+# Alternative: LoadBalancer Service for direct access
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui-loadbalancer
+  namespace: retail-store
+spec:
+  selector:
+    app: ui
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: LoadBalancer

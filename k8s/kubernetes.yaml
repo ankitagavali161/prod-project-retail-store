@@ -1,0 +1,994 @@
+# Combined Kubernetes manifest for Retail Store Sample App
+# This file contains all the manifests in a single file for easy deployment
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: retail-store
+  labels:
+    name: retail-store
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: retail-store
+type: Opaque
+data:
+  # Base64 encoded password: "retailstore123"
+  db-password: cmV0YWlsc3RvcmUxMjM=
+  # Base64 encoded username: "catalog_user"
+  catalog-username: Y2F0YWxvZ191c2Vy
+  # Base64 encoded username: "orders_user"  
+  orders-username: b3JkZXJzX3VzZXI=
+  # Base64 encoded username: "rabbitmq"
+  rabbitmq-username: cmFiYml0bXE=
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-credentials
+  namespace: retail-store
+type: Opaque
+data:
+  # Base64 encoded: "key"
+  aws-access-key-id: a2V5
+  # Base64 encoded: "dummy"
+  aws-secret-access-key: ZHVtbXk=
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-config
+  namespace: retail-store
+data:
+  RETAIL_CATALOG_PERSISTENCE_PROVIDER: "mysql"
+  RETAIL_CATALOG_PERSISTENCE_ENDPOINT: "catalog-db:3306"
+  GIN_MODE: "release"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cart-config
+  namespace: retail-store
+data:
+  RETAIL_CART_PERSISTENCE_PROVIDER: "dynamodb"
+  RETAIL_CART_PERSISTENCE_DYNAMODB_ENDPOINT: "http://carts-db:8000"
+  RETAIL_CART_PERSISTENCE_DYNAMODB_CREATE_TABLE: "true"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: checkout-config
+  namespace: retail-store
+data:
+  RETAIL_CHECKOUT_PERSISTENCE_PROVIDER: "redis"
+  RETAIL_CHECKOUT_PERSISTENCE_REDIS_URL: "redis://checkout-redis:6379"
+  RETAIL_CHECKOUT_ENDPOINTS_ORDERS: "http://orders:8080"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orders-config
+  namespace: retail-store
+data:
+  RETAIL_ORDERS_PERSISTENCE_PROVIDER: "postgres"
+  RETAIL_ORDERS_PERSISTENCE_ENDPOINT: "orders-db:5432"
+  RETAIL_ORDERS_PERSISTENCE_NAME: "orders"
+  RETAIL_ORDERS_MESSAGING_PROVIDER: "rabbitmq"
+  RETAIL_ORDERS_MESSAGING_RABBITMQ_ADDRESSES: "rabbitmq:5672"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ui-config
+  namespace: retail-store
+data:
+  RETAIL_UI_ENDPOINTS_CATALOG: "http://catalog:8080"
+  RETAIL_UI_ENDPOINTS_CARTS: "http://carts:8080"
+  RETAIL_UI_ENDPOINTS_ORDERS: "http://orders:8080"
+  RETAIL_UI_ENDPOINTS_CHECKOUT: "http://checkout:8080"
+
+---
+# MariaDB for Catalog Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-db
+  namespace: retail-store
+  labels:
+    app: catalog-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalog-db
+  template:
+    metadata:
+      labels:
+        app: catalog-db
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:10.9
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        - name: MYSQL_ALLOW_EMPTY_PASSWORD
+          value: "true"
+        - name: MYSQL_DATABASE
+          value: "catalogdb"
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: catalog-username
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        livenessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+            - -u
+            - catalog_user
+            - -p$(MYSQL_PASSWORD)
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+            - -u
+            - catalog_user
+            - -p$(MYSQL_PASSWORD)
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-db
+  namespace: retail-store
+spec:
+  selector:
+    app: catalog-db
+  ports:
+  - port: 3306
+    targetPort: 3306
+  type: ClusterIP
+
+---
+# DynamoDB Local for Cart Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carts-db
+  namespace: retail-store
+  labels:
+    app: carts-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: carts-db
+  template:
+    metadata:
+      labels:
+        app: carts-db
+    spec:
+      containers:
+      - name: dynamodb-local
+        image: amazon/dynamodb-local:1.20.0
+        ports:
+        - containerPort: 8000
+        command:
+        - java
+        - -jar
+        - DynamoDBLocal.jar
+        - -inMemory
+        - -sharedDb
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carts-db
+  namespace: retail-store
+spec:
+  selector:
+    app: carts-db
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
+
+---
+# Redis for Checkout Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-redis
+  namespace: retail-store
+  labels:
+    app: checkout-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: checkout-redis
+  template:
+    metadata:
+      labels:
+        app: checkout-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:6.0-alpine
+        ports:
+        - containerPort: 6379
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-redis
+  namespace: retail-store
+spec:
+  selector:
+    app: checkout-redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+  type: ClusterIP
+
+---
+# PostgreSQL for Orders Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-db
+  namespace: retail-store
+  labels:
+    app: orders-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-db
+  template:
+    metadata:
+      labels:
+        app: orders-db
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16.1
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        - name: POSTGRES_DB
+          value: "orders"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: orders-username
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -d
+            - orders
+            - -U
+            - orders_user
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -d
+            - orders
+            - -U
+            - orders_user
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-db
+  namespace: retail-store
+spec:
+  selector:
+    app: orders-db
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+
+---
+# RabbitMQ for Orders Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  namespace: retail-store
+  labels:
+    app: rabbitmq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3-management
+        ports:
+        - containerPort: 5672
+        - containerPort: 15672
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: rabbitmq-username
+        - name: RABBITMQ_DEFAULT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        livenessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: retail-store
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+  - name: amqp
+    port: 5672
+    targetPort: 5672
+  - name: management
+    port: 15672
+    targetPort: 15672
+  type: ClusterIP
+
+---
+# Catalog Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: retail-store
+  labels:
+    app: catalog
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: catalog
+  template:
+    metadata:
+      labels:
+        app: catalog
+    spec:
+      containers:
+      - name: catalog
+        image: public.ecr.aws/aws-containers/retail-store-sample-catalog:1.0.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: GIN_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: catalog-config
+              key: GIN_MODE
+        - name: RETAIL_CATALOG_PERSISTENCE_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: catalog-config
+              key: RETAIL_CATALOG_PERSISTENCE_PROVIDER
+        - name: RETAIL_CATALOG_PERSISTENCE_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: catalog-config
+              key: RETAIL_CATALOG_PERSISTENCE_ENDPOINT
+        - name: RETAIL_CATALOG_PERSISTENCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: retail-store
+spec:
+  selector:
+    app: catalog
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+---
+# Cart Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart
+  namespace: retail-store
+  labels:
+    app: cart
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cart
+  template:
+    metadata:
+      labels:
+        app: cart
+    spec:
+      containers:
+      - name: cart
+        image: public.ecr.aws/aws-containers/retail-store-sample-cart:1.0.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SERVER_TOMCAT_ACCESSLOG_ENABLED
+          value: "true"
+        - name: RETAIL_CART_PERSISTENCE_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: cart-config
+              key: RETAIL_CART_PERSISTENCE_PROVIDER
+        - name: RETAIL_CART_PERSISTENCE_DYNAMODB_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: cart-config
+              key: RETAIL_CART_PERSISTENCE_DYNAMODB_ENDPOINT
+        - name: RETAIL_CART_PERSISTENCE_DYNAMODB_CREATE_TABLE
+          valueFrom:
+            configMapKeyRef:
+              name: cart-config
+              key: RETAIL_CART_PERSISTENCE_DYNAMODB_CREATE_TABLE
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: aws-access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: aws-secret-access-key
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carts
+  namespace: retail-store
+spec:
+  selector:
+    app: cart
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+---
+# Checkout Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: retail-store
+  labels:
+    app: checkout
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: checkout
+  template:
+    metadata:
+      labels:
+        app: checkout
+    spec:
+      containers:
+      - name: checkout
+        image: public.ecr.aws/aws-containers/retail-store-sample-checkout:1.0.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: RETAIL_CHECKOUT_PERSISTENCE_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: checkout-config
+              key: RETAIL_CHECKOUT_PERSISTENCE_PROVIDER
+        - name: RETAIL_CHECKOUT_PERSISTENCE_REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: checkout-config
+              key: RETAIL_CHECKOUT_PERSISTENCE_REDIS_URL
+        - name: RETAIL_CHECKOUT_ENDPOINTS_ORDERS
+          valueFrom:
+            configMapKeyRef:
+              name: checkout-config
+              key: RETAIL_CHECKOUT_ENDPOINTS_ORDERS
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout
+  namespace: retail-store
+spec:
+  selector:
+    app: checkout
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+---
+# Orders Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  namespace: retail-store
+  labels:
+    app: orders
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      containers:
+      - name: orders
+        image: public.ecr.aws/aws-containers/retail-store-sample-orders:1.0.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SERVER_TOMCAT_ACCESSLOG_ENABLED
+          value: "true"
+        - name: RETAIL_ORDERS_PERSISTENCE_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: orders-config
+              key: RETAIL_ORDERS_PERSISTENCE_PROVIDER
+        - name: RETAIL_ORDERS_PERSISTENCE_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: orders-config
+              key: RETAIL_ORDERS_PERSISTENCE_ENDPOINT
+        - name: RETAIL_ORDERS_PERSISTENCE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: orders-config
+              key: RETAIL_ORDERS_PERSISTENCE_NAME
+        - name: RETAIL_ORDERS_PERSISTENCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: orders-username
+        - name: RETAIL_ORDERS_PERSISTENCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        - name: RETAIL_ORDERS_MESSAGING_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: orders-config
+              key: RETAIL_ORDERS_MESSAGING_PROVIDER
+        - name: RETAIL_ORDERS_MESSAGING_RABBITMQ_ADDRESSES
+          valueFrom:
+            configMapKeyRef:
+              name: orders-config
+              key: RETAIL_ORDERS_MESSAGING_RABBITMQ_ADDRESSES
+        - name: RETAIL_ORDERS_MESSAGING_RABBITMQ_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: rabbitmq-username
+        - name: RETAIL_ORDERS_MESSAGING_RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  namespace: retail-store
+spec:
+  selector:
+    app: orders
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+---
+# UI Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui
+  namespace: retail-store
+  labels:
+    app: ui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ui
+  template:
+    metadata:
+      labels:
+        app: ui
+    spec:
+      containers:
+      - name: ui
+        image: public.ecr.aws/aws-containers/retail-store-sample-ui:1.0.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: JAVA_OPTS
+          value: "-XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/urandom"
+        - name: SERVER_TOMCAT_ACCESSLOG_ENABLED
+          value: "true"
+        - name: RETAIL_UI_ENDPOINTS_CATALOG
+          valueFrom:
+            configMapKeyRef:
+              name: ui-config
+              key: RETAIL_UI_ENDPOINTS_CATALOG
+        - name: RETAIL_UI_ENDPOINTS_CARTS
+          valueFrom:
+            configMapKeyRef:
+              name: ui-config
+              key: RETAIL_UI_ENDPOINTS_CARTS
+        - name: RETAIL_UI_ENDPOINTS_ORDERS
+          valueFrom:
+            configMapKeyRef:
+              name: ui-config
+              key: RETAIL_UI_ENDPOINTS_ORDERS
+        - name: RETAIL_UI_ENDPOINTS_CHECKOUT
+          valueFrom:
+            configMapKeyRef:
+              name: ui-config
+              key: RETAIL_UI_ENDPOINTS_CHECKOUT
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  namespace: retail-store
+spec:
+  selector:
+    app: ui
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+---
+# LoadBalancer Service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui-loadbalancer
+  namespace: retail-store
+spec:
+  selector:
+    app: ui
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: LoadBalancer
+
+---
+# Ingress for nginx-ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retail-store-ingress
+  namespace: retail-store
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: retail-store.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ui
+            port:
+              number: 8080
+      - path: /catalog
+        pathType: Prefix
+        backend:
+          service:
+            name: catalog
+            port:
+              number: 8080
+      - path: /carts
+        pathType: Prefix
+        backend:
+          service:
+            name: carts
+            port:
+              number: 8080
+      - path: /orders
+        pathType: Prefix
+        backend:
+          service:
+            name: orders
+            port:
+              number: 8080
+      - path: /checkout
+        pathType: Prefix
+        backend:
+          service:
+            name: checkout
+            port:
+              number: 8080

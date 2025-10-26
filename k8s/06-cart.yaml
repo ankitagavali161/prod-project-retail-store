@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart
+  namespace: retail-store
+  labels:
+    app: cart
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cart
+  template:
+    metadata:
+      labels:
+        app: cart
+    spec:
+      containers:
+      - name: cart
+        image: public.ecr.aws/aws-containers/retail-store-sample-cart:1.0.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SERVER_TOMCAT_ACCESSLOG_ENABLED
+          value: "true"
+        - name: RETAIL_CART_PERSISTENCE_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: cart-config
+              key: RETAIL_CART_PERSISTENCE_PROVIDER
+        - name: RETAIL_CART_PERSISTENCE_DYNAMODB_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: cart-config
+              key: RETAIL_CART_PERSISTENCE_DYNAMODB_ENDPOINT
+        - name: RETAIL_CART_PERSISTENCE_DYNAMODB_CREATE_TABLE
+          valueFrom:
+            configMapKeyRef:
+              name: cart-config
+              key: RETAIL_CART_PERSISTENCE_DYNAMODB_CREATE_TABLE
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: aws-access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: aws-secret-access-key
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+          readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carts
+  namespace: retail-store
+spec:
+  selector:
+    app: cart
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP

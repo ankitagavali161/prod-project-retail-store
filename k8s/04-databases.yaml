@@ -1,0 +1,350 @@
+# MariaDB for Catalog Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-db
+  namespace: retail-store
+  labels:
+    app: catalog-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalog-db
+  template:
+    metadata:
+      labels:
+        app: catalog-db
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:10.9
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        - name: MYSQL_ALLOW_EMPTY_PASSWORD
+          value: "true"
+        - name: MYSQL_DATABASE
+          value: "catalogdb"
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: catalog-username
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        livenessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+            - -u
+            - catalog_user
+            - -p$(MYSQL_PASSWORD)
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+            - -u
+            - catalog_user
+            - -p$(MYSQL_PASSWORD)
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-db
+  namespace: retail-store
+spec:
+  selector:
+    app: catalog-db
+  ports:
+  - port: 3306
+    targetPort: 3306
+  type: ClusterIP
+
+---
+# DynamoDB Local for Cart Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carts-db
+  namespace: retail-store
+  labels:
+    app: carts-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: carts-db
+  template:
+    metadata:
+      labels:
+        app: carts-db
+    spec:
+      containers:
+      - name: dynamodb-local
+        image: amazon/dynamodb-local:1.20.0
+        ports:
+        - containerPort: 8000
+        command:
+        - java
+        - -jar
+        - DynamoDBLocal.jar
+        - -inMemory
+        - -sharedDb
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carts-db
+  namespace: retail-store
+spec:
+  selector:
+    app: carts-db
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
+
+---
+# Redis for Checkout Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-redis
+  namespace: retail-store
+  labels:
+    app: checkout-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: checkout-redis
+  template:
+    metadata:
+      labels:
+        app: checkout-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:6.0-alpine
+        ports:
+        - containerPort: 6379
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-redis
+  namespace: retail-store
+spec:
+  selector:
+    app: checkout-redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+  type: ClusterIP
+
+---
+# PostgreSQL for Orders Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-db
+  namespace: retail-store
+  labels:
+    app: orders-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-db
+  template:
+    metadata:
+      labels:
+        app: orders-db
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16.1
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        - name: POSTGRES_DB
+          value: "orders"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: orders-username
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -d
+            - orders
+            - -U
+            - orders_user
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -d
+            - orders
+            - -U
+            - orders_user
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-db
+  namespace: retail-store
+spec:
+  selector:
+    app: orders-db
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+
+---
+# RabbitMQ for Orders Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  namespace: retail-store
+  labels:
+    app: rabbitmq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3-management
+        ports:
+        - containerPort: 5672
+        - containerPort: 15672
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: rabbitmq-username
+        - name: RABBITMQ_DEFAULT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: db-password
+        livenessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - rabbitmq-diagnostics
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: retail-store
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+  - name: amqp
+    port: 5672
+    targetPort: 5672
+  - name: management
+    port: 15672
+    targetPort: 15672
+  type: ClusterIP

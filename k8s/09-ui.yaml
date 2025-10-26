@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui
+  namespace: retail-store
+  labels:
+    app: ui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ui
+  template:
+    metadata:
+      labels:
+        app: ui
+    spec:
+      containers:
+      - name: ui
+        image: public.ecr.aws/aws-containers/retail-store-sample-ui:1.0.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: JAVA_OPTS
+          value: "-XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/urandom"
+        - name: SERVER_TOMCAT_ACCESSLOG_ENABLED
+          value: "true"
+        - name: RETAIL_UI_ENDPOINTS_CATALOG
+          valueFrom:
+            configMapKeyRef:
+              name: ui-config
+              key: RETAIL_UI_ENDPOINTS_CATALOG
+        - name: RETAIL_UI_ENDPOINTS_CARTS
+          valueFrom:
+            configMapKeyRef:
+              name: ui-config
+              key: RETAIL_UI_ENDPOINTS_CARTS
+        - name: RETAIL_UI_ENDPOINTS_ORDERS
+          valueFrom:
+            configMapKeyRef:
+              name: ui-config
+              key: RETAIL_UI_ENDPOINTS_ORDERS
+        - name: RETAIL_UI_ENDPOINTS_CHECKOUT
+          valueFrom:
+            configMapKeyRef:
+              name: ui-config
+              key: RETAIL_UI_ENDPOINTS_CHECKOUT
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  namespace: retail-store
+spec:
+  selector:
+    app: ui
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
